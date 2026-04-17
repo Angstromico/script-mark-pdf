@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { marked } from 'marked';
-import puppeteer from 'puppeteer';
+import { mdToPdf } from 'md-to-pdf';
 import chalk from 'chalk';
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -16,118 +15,12 @@ const DEFAULT_OUTPUT_DIR = './pdf';
 interface ConversionOptions {
   input: string;
   output: string;
-  individual: boolean;
+  file: boolean;
   recursive: boolean;
 }
 
-// HTML template for PDF generation
-const HTML_TEMPLATE = (content: string, title: string) => `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>${title}</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      max-width: 800px;
-      margin: 40px auto;
-      padding: 20px;
-      line-height: 1.6;
-      color: #333;
-    }
-    h1, h2, h3, h4, h5, h6 {
-      color: #2c3e50;
-      margin-top: 1.5em;
-      margin-bottom: 0.5em;
-    }
-    h1 { border-bottom: 2px solid #eee; padding-bottom: 0.3em; }
-    code {
-      background: #f4f4f4;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-family: 'Courier New', monospace;
-    }
-    pre {
-      background: #f4f4f4;
-      padding: 16px;
-      border-radius: 5px;
-      overflow-x: auto;
-    }
-    pre code {
-      background: none;
-      padding: 0;
-    }
-    blockquote {
-      border-left: 4px solid #ddd;
-      padding-left: 16px;
-      margin-left: 0;
-      color: #666;
-    }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 1em 0;
-    }
-    th, td {
-      border: 1px solid #ddd;
-      padding: 8px 12px;
-      text-align: left;
-    }
-    th {
-      background: #f4f4f4;
-    }
-    a {
-      color: #3498db;
-      text-decoration: none;
-    }
-    a:hover {
-      text-decoration: underline;
-    }
-    img {
-      max-width: 100%;
-      height: auto;
-    }
-  </style>
-</head>
-<body>
-  ${content}
-</body>
-</html>
-`;
-
 /**
- * Convert markdown content to HTML
- */
-async function markdownToHtml(markdown: string): Promise<string> {
-  return await marked(markdown);
-}
-
-/**
- * Convert HTML to PDF using Puppeteer
- */
-async function htmlToPdf(html: string, outputPath: string): Promise<void> {
-  const browser = await puppeteer.launch({ headless: true });
-  const page = await browser.newPage();
-  
-  await page.setContent(html, { waitUntil: 'networkidle0' });
-  await page.pdf({
-    path: outputPath,
-    format: 'A4',
-    printBackground: true,
-    margin: {
-      top: '20px',
-      right: '20px',
-      bottom: '20px',
-      left: '20px'
-    }
-  });
-  
-  await browser.close();
-}
-
-/**
- * Convert a single markdown file to PDF
+ * Convert a single markdown file to PDF using md-to-pdf
  */
 async function convertFile(
   inputPath: string,
@@ -136,16 +29,34 @@ async function convertFile(
   try {
     console.log(chalk.blue(`Converting: ${inputPath}`));
     
-    const markdown = await fs.readFile(inputPath, 'utf-8');
-    const htmlContent = await markdownToHtml(markdown);
-    const title = path.basename(inputPath, path.extname(inputPath));
-    const html = HTML_TEMPLATE(htmlContent, title);
-    
     // Ensure output directory exists
     await fs.ensureDir(path.dirname(outputPath));
     
-    await htmlToPdf(html, outputPath);
-    console.log(chalk.green(`✓ Created: ${outputPath}`));
+    // Use md-to-pdf for conversion with better code highlighting
+    const pdf = await mdToPdf(
+      { path: inputPath },
+      {
+        dest: outputPath,
+        launch_options: {
+          args: ['--no-sandbox', '--disable-setuid-sandbox'],
+          timeout: 60000
+        },
+        pdf_options: {
+          format: 'A4',
+          printBackground: true,
+          margin: {
+            top: '20mm',
+            right: '20mm',
+            bottom: '20mm',
+            left: '20mm'
+          }
+        }
+      }
+    ).catch(console.error);
+    
+    if (pdf) {
+      console.log(chalk.green(`✓ Created: ${outputPath}`));
+    }
   } catch (error) {
     console.error(chalk.red(`✗ Error converting ${inputPath}:`), error);
     throw error;
@@ -245,7 +156,7 @@ async function main(): Promise<void> {
   console.log(chalk.bold.cyan('\n=== Markdown to PDF Converter ===\n'));
   
   try {
-    if (options.individual) {
+    if (options.file) {
       // Single file conversion
       const inputPath = path.resolve(options.input);
       
