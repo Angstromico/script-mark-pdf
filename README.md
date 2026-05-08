@@ -30,6 +30,13 @@ A TypeScript CLI application that converts markdown files to PDF and Word docume
 - **Efficient Processing**: One read operation, two output formats
 - **Default Folders**: Reads from `md-files`, outputs to `docs-files`
 
+### Clean Folders
+- **Batch Cleanup**: Remove all files from output directories in one command
+- **Safe Operation**: Preserves folder structure, only deletes contents
+- **Dry Run Mode**: Preview what would be deleted without actually deleting
+- **Custom Folders**: Optionally clean specific folders only
+- **Default Folders**: Cleans `markdown`, `pdf`, `word`, `md`, `md-files`, and `docs-files`
+
 ## Installation
 
 1. Clone or download this repository
@@ -189,6 +196,48 @@ Run the dual converter directly with TypeScript:
 npm run dev:md-to-docs -- -i ./md-files -o ./docs-files
 ```
 
+## Clean Folders
+
+### Basic Usage
+
+Clean all files inside the default folders:
+
+```bash
+npm run clean
+```
+
+This will remove all contents from:
+- `./markdown`
+- `./pdf`
+- `./word`
+- `./md`
+- `./md-files`
+- `./docs-files`
+
+### Preview Before Cleaning (Dry Run)
+
+See what would be deleted without actually deleting:
+
+```bash
+npm run clean -- --dry-run
+```
+
+### Clean Specific Folders
+
+Clean only specific folders:
+
+```bash
+npm run clean -- --folders ./pdf,./word
+```
+
+### Development Mode for Clean
+
+Run the clean command directly with TypeScript:
+
+```bash
+npm run dev:clean
+```
+
 ## Command Line Options
 
 | Option | Alias | Description | Default |
@@ -240,7 +289,8 @@ script-mark-pdf/
 ├── src/
 │   ├── index.ts          # Main TypeScript source code (PDF converter)
 │   ├── md-to-word.ts     # TypeScript source code (Word converter)
-│   └── md-to-docs.ts     # TypeScript source code (Dual PDF+Word converter)
+│   ├── md-to-docs.ts     # TypeScript source code (Dual PDF+Word converter)
+│   └── clean-folders.ts  # TypeScript source code (Clean folders utility)
 ├── dist/                 # Compiled JavaScript (created after build)
 ├── markdown/             # Default input directory for markdown files
 ├── md-files/             # Default input for dual converter
@@ -324,6 +374,10 @@ script-mark-pdf/
 ### Dual Converter (PDF + Word)
 - `npm run md-to-docs`: Run the compiled dual converter
 - `npm run dev:md-to-docs`: Run the dual converter directly with TypeScript (ts-node)
+
+### Clean Folders
+- `npm run clean`: Clean all default folders
+- `npm run dev:clean`: Run the clean command directly with TypeScript (ts-node)
 
 ## License
 
