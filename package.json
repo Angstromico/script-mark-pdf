@@ -11,6 +11,8 @@
     "dev:md-to-word": "ts-node src/md-to-word.ts",
     "md-to-docs": "node dist/md-to-docs.js",
     "dev:md-to-docs": "ts-node src/md-to-docs.ts",
+    "clean": "node dist/clean-folders.js",
+    "dev:clean": "ts-node src/clean-folders.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
