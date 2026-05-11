@@ -11,8 +11,8 @@
     "dev:md-to-word": "ts-node src/md-to-word.ts",
     "md-to-docs": "node dist/md-to-docs.js",
     "dev:md-to-docs": "ts-node src/md-to-docs.ts",
-    "clean": "node dist/clean-folders.js",
-    "dev:clean": "ts-node src/clean-folders.ts",
+    "pdf-to-md": "node dist/pdf-to-md.js",
+    "dev:pdf-to-md": "ts-node src/pdf-to-md.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -30,6 +30,7 @@
     "fs-extra": "^11.2.0",
     "marked": "^18.0.2",
     "md-to-pdf": "^5.2.4",
+    "pdfjs-dist": "^3.11.174",
     "puppeteer": "^21.0.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
