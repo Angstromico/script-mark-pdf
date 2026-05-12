@@ -7,12 +7,14 @@ import { Command } from 'commander';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
+import * as puppeteer from 'puppeteer';
 import {
   AlignmentType,
   BorderStyle,
   Document,
   ExternalHyperlink,
   HeadingLevel,
+  ImageRun,
   Packer,
   Paragraph,
   ShadingType,
@@ -47,6 +49,76 @@ type CliOptions = {
   output: string;
   recursive: boolean;
 };
+
+// Global browser instance for mermaid rendering
+let browserInstance: puppeteer.Browser | null = null;
+
+async function initBrowser(): Promise<puppeteer.Browser> {
+  if (!browserInstance) {
+    browserInstance = await puppeteer.launch({
+      headless: 'new' as puppeteer.PuppeteerLaunchOptions['headless'],
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+  }
+  return browserInstance;
+}
+
+async function closeBrowser(): Promise<void> {
+  if (browserInstance) {
+    await browserInstance.close();
+    browserInstance = null;
+  }
+}
+
+async function renderMermaidToBuffer(mermaidCode: string): Promise<Buffer | null> {
+  try {
+    const browser = await initBrowser();
+    const page = await browser.newPage();
+    
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <style>
+    body { margin: 0; padding: 20px; background: white; }
+    .mermaid { display: flex; justify-content: center; }
+  </style>
+</head>
+<body>
+  <div class="mermaid">${mermaidCode}</div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  </script>
+</body>
+</html>`;
+    
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    
+    // Wait for mermaid to render
+    await page.waitForSelector('.mermaid svg', { timeout: 10000 });
+    
+    // Get the SVG element
+    const svgElement = await page.$('.mermaid svg');
+    if (!svgElement) {
+      await page.close();
+      return null;
+    }
+    
+    // Take screenshot of the SVG
+    const screenshot = await svgElement.screenshot({
+      type: 'png',
+      omitBackground: true
+    });
+    
+    await page.close();
+    return screenshot;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(chalk.yellow(`Warning: Failed to render mermaid diagram: ${message}`));
+    return null;
+  }
+}
 
 function normalizeCodeLine(line: string): string {
   const withExpandedTabs = line.replace(/\t/g, '    ');
@@ -200,6 +272,38 @@ function renderCodeBlock(node: MdNode): Paragraph[] {
   return out;
 }
 
+async function renderMermaidBlock(node: MdNode): Promise<(Paragraph)[]> {
+  const mermaidCode = node.value ?? '';
+  const imageBuffer = await renderMermaidToBuffer(mermaidCode);
+  
+  if (!imageBuffer) {
+    // Fallback to plain code block if rendering fails
+    return renderCodeBlock(node);
+  }
+  
+  const out: Paragraph[] = [];
+  
+  // Add the rendered image
+  out.push(
+    new Paragraph({
+      children: [
+        new ImageRun({
+          data: imageBuffer,
+          transformation: {
+            width: 550,
+            height: 350
+          },
+          type: 'png'
+        })
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 200, after: 200 }
+    })
+  );
+  
+  return out;
+}
+
 function renderTable(node: MdNode): Table {
   const rows = node.children ?? [];
 
@@ -298,7 +402,7 @@ function renderBlockquote(node: MdNode): Paragraph[] {
   return out;
 }
 
-function markdownAstToDocElements(root: MdNode): Array<Paragraph | Table> {
+async function markdownAstToDocElements(root: MdNode): Promise<Array<Paragraph | Table>> {
   const output: Array<Paragraph | Table> = [];
   const nodes = root.children ?? [];
 
@@ -319,7 +423,12 @@ function markdownAstToDocElements(root: MdNode): Array<Paragraph | Table> {
     }
 
     if (node.type === 'code') {
-      output.push(...renderCodeBlock(node));
+      // Check if it's a mermaid diagram
+      if (node.lang === 'mermaid') {
+        output.push(...(await renderMermaidBlock(node)));
+      } else {
+        output.push(...renderCodeBlock(node));
+      }
       output.push(new Paragraph({ text: '', spacing: { after: 120 } }));
       continue;
     }
@@ -379,7 +488,7 @@ async function convertMarkdownFile(inputFile: string, outputFile: string): Promi
   const raw = await fs.readFile(inputFile, 'utf-8');
   const ast = unified().use(remarkParse).use(remarkGfm).parse(raw) as MdNode;
 
-  const docElements = markdownAstToDocElements(ast);
+  const docElements = await markdownAstToDocElements(ast);
 
   const doc = new Document({
     styles: {
@@ -481,6 +590,9 @@ async function run(): Promise<void> {
       console.error(chalk.red(message));
     }
   }
+
+  // Close the browser instance when done
+  await closeBrowser();
 
   console.log(chalk.bold.cyan('\nConversion summary'));
   console.log(chalk.green(`Success: ${ok}`));
