@@ -484,7 +484,7 @@ async function collectMarkdownFiles(rootDir: string, recursive: boolean): Promis
   return files;
 }
 
-async function convertMarkdownFile(inputFile: string, outputFile: string): Promise<void> {
+export async function convertMarkdownFile(inputFile: string, outputFile: string): Promise<void> {
   const raw = await fs.readFile(inputFile, 'utf-8');
   const ast = unified().use(remarkParse).use(remarkGfm).parse(raw) as MdNode;
 

@@ -22,7 +22,7 @@ interface ConversionOptions {
 /**
  * Convert a single markdown file to PDF using md-to-pdf
  */
-async function convertFile(
+export async function convertFile(
   inputPath: string,
   outputPath: string
 ): Promise<void> {

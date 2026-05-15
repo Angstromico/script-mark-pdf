@@ -13,6 +13,8 @@
     "dev:md-to-docs": "ts-node src/md-to-docs.ts",
     "pdf-to-md": "node dist/pdf-to-md.js",
     "dev:pdf-to-md": "ts-node src/pdf-to-md.ts",
+    "md-to-all": "node dist/md-to-all.js",
+    "dev:md-to-all": "ts-node src/md-to-all.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
