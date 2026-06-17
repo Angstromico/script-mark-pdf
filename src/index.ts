@@ -32,6 +32,22 @@ export async function convertFile(
     // Ensure output directory exists
     await fs.ensureDir(path.dirname(outputPath));
     
+    const mermaidScript = `
+      if (typeof window.mermaid !== 'undefined') {
+        window.mermaid.initialize({ startOnLoad: false });
+        const elements = document.querySelectorAll('pre code.language-mermaid');
+        for (const el of elements) {
+          const div = document.createElement('div');
+          div.className = 'mermaid';
+          div.textContent = el.textContent;
+          if (el.parentElement) {
+            el.parentElement.replaceWith(div);
+          }
+        }
+        window.mermaid.run({ querySelector: '.mermaid' }).catch(console.error);
+      }
+    `;
+
     // Use md-to-pdf for conversion with better code highlighting
     const pdf = await mdToPdf(
       { path: inputPath },
@@ -50,7 +66,11 @@ export async function convertFile(
             bottom: '20mm',
             left: '20mm'
           }
-        }
+        },
+        script: [
+          { path: require.resolve('mermaid/dist/mermaid.min.js') },
+          { content: mermaidScript }
+        ]
       }
     ).catch(console.error);
     

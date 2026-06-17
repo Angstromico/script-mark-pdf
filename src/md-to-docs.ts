@@ -5,8 +5,7 @@ import chalk from 'chalk';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { mdToPdf } from 'md-to-pdf';
-import * as docx from 'docx';
-import { marked, parse } from 'marked';
+import { convertMarkdownFile as markdownToDocx, closeBrowser } from './md-to-word';
 
 const program = new Command();
 
@@ -19,34 +18,6 @@ interface ConversionOptions {
   output: string;
   file: boolean;
   recursive: boolean;
-}
-
-/**
- * Convert markdown content to Word document
- */
-async function markdownToDocx(markdownContent: string): Promise<docx.Document> {
-  // Parse markdown to HTML
-  const htmlContent = await marked(markdownContent);
-
-  // Create a simple Word document with the content
-  // For now, we'll put the HTML content as text (simplified approach)
-  const plainText = markdownContent;
-
-  return new docx.Document({
-    sections: [{
-      properties: {},
-      children: [
-        new docx.Paragraph({
-          children: [
-            new docx.TextRun({
-              text: plainText,
-              size: 24, // 12pt font
-            }),
-          ],
-        }),
-      ],
-    }],
-  });
 }
 
 /**
@@ -66,25 +37,45 @@ async function convertMarkdownToDocs(
     const pdfPath = path.join(outputDir, `${fileName}.pdf`);
     const docxPath = path.join(outputDir, `${fileName}.docx`);
 
-    // Read markdown content
+    // Read markdown content for PDF conversion
     const markdownContent = await fs.readFile(inputPath, 'utf-8');
 
     // Convert to PDF
     try {
+      const mermaidScript = `
+        if (typeof window.mermaid !== 'undefined') {
+          window.mermaid.initialize({ startOnLoad: false });
+          const elements = document.querySelectorAll('pre code.language-mermaid');
+          for (const el of elements) {
+            const div = document.createElement('div');
+            div.className = 'mermaid';
+            div.textContent = el.textContent;
+            if (el.parentElement) {
+              el.parentElement.replaceWith(div);
+            }
+          }
+          window.mermaid.run({ querySelector: '.mermaid' }).catch(console.error);
+        }
+      `;
+
       await mdToPdf(
         { content: markdownContent },
-        { dest: pdfPath }
+        { 
+          dest: pdfPath,
+          script: [
+            { path: require.resolve('mermaid/dist/mermaid.min.js') },
+            { content: mermaidScript }
+          ]
+        }
       );
       console.log(chalk.green(`  ✓ PDF: ${pdfPath}`));
     } catch (pdfError) {
       console.error(chalk.red(`  ✗ PDF failed: ${inputPath}`), pdfError);
     }
 
-    // Convert to DOCX
+    // Convert to DOCX using the high-quality converter
     try {
-      const doc = await markdownToDocx(markdownContent);
-      const buffer = await docx.Packer.toBuffer(doc);
-      await fs.writeFile(docxPath, buffer);
+      await markdownToDocx(inputPath, docxPath);
       console.log(chalk.green(`  ✓ DOCX: ${docxPath}`));
     } catch (docxError) {
       console.error(chalk.red(`  ✗ DOCX failed: ${inputPath}`), docxError);
@@ -213,6 +204,9 @@ async function main() {
 
       await convertDirectory(inputDir, outputDir, options.recursive);
     }
+
+    // Close the browser instance when done
+    await closeBrowser();
 
     console.log(chalk.green('\n✓ All conversions completed!\n'));
   } catch (error) {

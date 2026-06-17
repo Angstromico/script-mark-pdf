@@ -63,7 +63,7 @@ async function initBrowser(): Promise<puppeteer.Browser> {
   return browserInstance;
 }
 
-async function closeBrowser(): Promise<void> {
+export async function closeBrowser(): Promise<void> {
   if (browserInstance) {
     await browserInstance.close();
     browserInstance = null;

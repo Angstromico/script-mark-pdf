@@ -4,7 +4,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { convertMarkdownFile } from './md-to-word';
+import { convertMarkdownFile, closeBrowser } from './md-to-word';
 import { convertFile } from './index';
 
 const DEFAULT_INPUT_DIR = './md-files';
@@ -69,6 +69,8 @@ async function run(): Promise<void> {
       console.error(chalk.red(`  Word failed: ${e}`));
     }
   }
+
+  await closeBrowser();
 }
 
 run().catch(console.error);
