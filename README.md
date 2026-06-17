@@ -1,41 +1,37 @@
 # Markdown to Document Converter
 
-A TypeScript CLI application that converts markdown files to PDF and Word documents with support for batch processing, subfolder preservation, and individual file conversion.
+A TypeScript CLI application that converts markdown files to professional PDF and Word documents, featuring full support for **Mermaid diagrams**, batch processing, and high-quality formatting.
 
 ## Features
 
-### Markdown to PDF
-- **Batch Conversion**: Convert all markdown files in a directory to PDF
-- **Subfolder Preservation**: Maintains the original folder structure in the output directory
-- **Individual File Conversion**: Convert single markdown files to PDF
-- **Customizable Paths**: Specify custom input and output directories
-- **Recursive Processing**: Option to process subfolders (enabled by default)
-- **Beautiful PDF Output**: Clean, styled PDFs with proper formatting for code blocks, tables, and more
-- **Colored Console Output**: Easy-to-read progress updates
+### 📊 Mermaid Diagram Support
+- **PDF Rendering**: Mermaid diagrams are rendered directly during PDF generation using `md-to-pdf`.
+- **Word Rendering**: Diagrams are automatically rendered into high-quality images and embedded into the `.docx` files.
+- **Seamless Integration**: Simply use standard ` ```mermaid ` blocks in your markdown files.
 
-### Markdown to Word
-- **Batch Conversion**: Convert all markdown files in a directory to Word (.docx)
-- **Subfolder Preservation**: Maintains the original folder structure in the output directory
-- **Individual File Conversion**: Convert single markdown files to Word
-- **Customizable Paths**: Specify custom input and output directories
-- **Recursive Processing**: Option to process subfolders (enabled by default)
-- **Clean Word Documents**: Well-formatted .docx files with proper text formatting
-- **Colored Console Output**: Easy-to-read progress updates
+### 📄 Markdown to PDF
+- **Batch Conversion**: Convert all markdown files in a directory to PDF.
+- **Subfolder Preservation**: Maintains the original folder structure in the output directory.
+- **Beautiful Output**: Clean, styled PDFs with syntax highlighting, tables, and full Mermaid support.
 
-### Markdown to All (PDF + Word)
-- **Unified Conversion**: Converts markdown files to both PDF and Word in one go
-- **Formatted Output**: Uses high-quality styling for both PDF and Word documents
-- **Default Folders**: Reads from `md-files`, outputs to `docs-files`
+### 📝 Markdown to Word
+- **Professional Formatting**: High-quality `.docx` generation with proper headings, lists, tables, and styling.
+- **Embedded Diagrams**: Mermaid diagrams are automatically converted to images and included in the document.
+- **Folder structure**: Preserves your directory tree in the output folder.
+
+### 🔄 Dual Conversion (PDF + Word)
+- **One-Step Processing**: Generate both formats simultaneously using `md-to-docs` or `md-to-all`.
+- **Consistent Quality**: Both formats share the same high-quality rendering engine for diagrams and layout.
 
 ...
 
 ### Dual Converter (PDF + Word)
-- `npm run md-to-docs`: Run the compiled dual converter (Simplified)
-- `npm run dev:md-to-docs`: Run the dual converter directly (Simplified)
+- `npm run md-to-docs`: Converts all files in `./md-files` to both PDF and Word in `./docs-files`.
+- `npm run dev:md-to-docs`: Run the dual converter directly using `ts-node`.
 
-### Unified Converter (PDF + Word with High-Quality Formatting)
-- `npm run md-to-all`: Run the compiled high-quality dual converter
-- `npm run dev:md-to-all`: Run the high-quality dual converter directly with TypeScript (ts-node)
+### High-Quality Unified Converter
+- `npm run md-to-all`: Alternative command for dual conversion with specialized formatting.
+- `npm run dev:md-to-all`: Run the high-quality unified converter with TypeScript.
 
 
 ### Clean Folders
