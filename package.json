@@ -23,7 +23,7 @@
     "typescript"
   ],
   "author": "Manuel Morales",
-  "license": "ISC",
+  "license": "GPL-3.0",
   "dependencies": {
     "@types/marked": "^5.0.2",
     "chalk": "^4.1.2",
