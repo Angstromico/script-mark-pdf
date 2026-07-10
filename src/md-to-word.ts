@@ -35,6 +35,7 @@ type MdNode = {
   depth?: number;
   value?: string;
   url?: string;
+  alt?: string;
   ordered?: boolean;
   start?: number;
   spread?: boolean;
@@ -143,7 +144,55 @@ type InlineStyle = {
   strike?: boolean;
 };
 
-function renderInlineNodes(nodes: MdNode[] | undefined, style: InlineStyle = {}): ParagraphChild[] {
+function getPngSize(buffer: Buffer): { width: number; height: number } | null {
+  if (buffer.length < 24) return null;
+  const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47;
+  if (!isPng) return null;
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  return { width, height };
+}
+
+function getJpegSize(buffer: Buffer): { width: number; height: number } | null {
+  if (buffer.length < 4) return null;
+  if (buffer[0] !== 0xFF || buffer[1] !== 0xD8) return null;
+
+  let offset = 2;
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xFF) return null;
+
+    // Skip padding 0xFFs
+    while (buffer[offset] === 0xFF) {
+      offset++;
+    }
+
+    const marker = buffer[offset];
+    offset++;
+
+    if (marker === 0xD9) { // EOI
+      return null;
+    }
+
+    if (offset + 2 > buffer.length) return null;
+    const length = buffer.readUInt16BE(offset);
+
+    if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
+      if (offset + 8 > buffer.length) return null;
+      const height = buffer.readUInt16BE(offset + 3);
+      const width = buffer.readUInt16BE(offset + 5);
+      return { width, height };
+    }
+
+    offset += length;
+  }
+  return null;
+}
+
+async function renderInlineNodes(
+  nodes: MdNode[] | undefined,
+  style: InlineStyle = {},
+  baseDir: string
+): Promise<ParagraphChild[]> {
   if (!nodes || nodes.length === 0) {
     return [new TextRun({ text: '', ...style })];
   }
@@ -157,17 +206,17 @@ function renderInlineNodes(nodes: MdNode[] | undefined, style: InlineStyle = {})
     }
 
     if (node.type === 'strong') {
-      parts.push(...renderInlineNodes(node.children, { ...style, bold: true }));
+      parts.push(...(await renderInlineNodes(node.children, { ...style, bold: true }, baseDir)));
       continue;
     }
 
     if (node.type === 'emphasis') {
-      parts.push(...renderInlineNodes(node.children, { ...style, italics: true }));
+      parts.push(...(await renderInlineNodes(node.children, { ...style, italics: true }, baseDir)));
       continue;
     }
 
     if (node.type === 'delete') {
-      parts.push(...renderInlineNodes(node.children, { ...style, strike: true }));
+      parts.push(...(await renderInlineNodes(node.children, { ...style, strike: true }, baseDir)));
       continue;
     }
 
@@ -204,6 +253,51 @@ function renderInlineNodes(nodes: MdNode[] | undefined, style: InlineStyle = {})
       continue;
     }
 
+    if (node.type === 'image') {
+      const imgUrl = node.url ?? '';
+      const imgPath = path.resolve(baseDir, imgUrl);
+
+      if (await fs.pathExists(imgPath)) {
+        try {
+          const imgBuffer = await fs.readFile(imgPath);
+          const ext = path.extname(imgPath).toLowerCase().replace('.', '');
+
+          let width = 300;
+          let height = 200;
+          const size = getPngSize(imgBuffer) || getJpegSize(imgBuffer);
+          if (size) {
+            width = size.width;
+            height = size.height;
+          }
+
+          const maxWidth = 500;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+
+          parts.push(
+            new ImageRun({
+              data: imgBuffer,
+              transformation: {
+                width,
+                height
+              },
+              type: ext === 'jpg' || ext === 'jpeg' ? 'jpg' : 'png'
+            })
+          );
+          continue;
+        } catch (err) {
+          console.warn(chalk.yellow(`Warning: Failed to load image ${imgPath}: ${err}`));
+        }
+      } else {
+        console.warn(chalk.yellow(`Warning: Image file not found: ${imgPath}`));
+      }
+
+      parts.push(new TextRun({ text: node.alt || node.value || imgUrl, ...style }));
+      continue;
+    }
+
       parts.push(new TextRun({ text: textFromInline(node), ...style }));
   }
 
@@ -227,9 +321,13 @@ function mapHeadingLevel(depth: number): (typeof HeadingLevel)[keyof typeof Head
   }
 }
 
-function paragraphFromInline(children: MdNode[] | undefined, options: Partial<IParagraphOptions> = {}): Paragraph {
+async function paragraphFromInline(
+  children: MdNode[] | undefined,
+  options: Partial<IParagraphOptions> = {},
+  baseDir: string
+): Promise<Paragraph> {
   return new Paragraph({
-    children: renderInlineNodes(children),
+    children: await renderInlineNodes(children, {}, baseDir),
     ...options
   });
 }
@@ -304,26 +402,26 @@ async function renderMermaidBlock(node: MdNode): Promise<(Paragraph)[]> {
   return out;
 }
 
-function renderTable(node: MdNode): Table {
+async function renderTable(node: MdNode, baseDir: string): Promise<Table> {
   const rows = node.children ?? [];
 
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    rows: rows.map((rowNode, rowIndex) => {
+  const tableRows = await Promise.all(
+    rows.map(async (rowNode, rowIndex) => {
       const cellNodes = rowNode.children ?? [];
 
-      return new TableRow({
-        tableHeader: rowIndex === 0,
-        children: cellNodes.map((cellNode, cellIndex) => {
+      const cells = await Promise.all(
+        cellNodes.map(async (cellNode, cellIndex) => {
           const align = rowIndex > 0 ? node.align?.[cellIndex] : null;
-          const paragraph = paragraphFromInline(cellNode.children, {
+          const paragraph = await paragraphFromInline(cellNode.children, {
             alignment:
               align === 'center'
                 ? AlignmentType.CENTER
                 : align === 'right'
                   ? AlignmentType.RIGHT
-                  : AlignmentType.LEFT
-          });
+                  : align === 'left'
+                    ? AlignmentType.LEFT
+                    : undefined
+          }, baseDir);
 
           return new TableCell({
             children: [paragraph],
@@ -335,12 +433,22 @@ function renderTable(node: MdNode): Table {
             width: { size: 100 / Math.max(cellNodes.length, 1), type: WidthType.PERCENTAGE }
           });
         })
+      );
+
+      return new TableRow({
+        tableHeader: rowIndex === 0,
+        children: cells
       });
     })
+  );
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: tableRows
   });
 }
 
-function renderList(node: MdNode, depth = 0): Paragraph[] {
+async function renderList(node: MdNode, depth = 0, baseDir: string): Promise<Paragraph[]> {
   const out: Paragraph[] = [];
   const items = node.children ?? [];
   const listRef = node.ordered ? 'ordered-rfc' : 'bullet-rfc';
@@ -352,36 +460,36 @@ function renderList(node: MdNode, depth = 0): Paragraph[] {
     const firstTextChildren = firstParagraph?.children ?? [];
 
     out.push(
-      paragraphFromInline(firstTextChildren, {
+      await paragraphFromInline(firstTextChildren, {
         numbering: {
           reference: listRef,
           level: Math.min(depth, 8)
         }
-      })
+      }, baseDir)
     );
 
     for (const nestedList of nested) {
-      out.push(...renderList(nestedList, depth + 1));
+      out.push(...(await renderList(nestedList, depth + 1, baseDir)));
     }
   }
 
   return out;
 }
 
-function renderBlockquote(node: MdNode): Paragraph[] {
+async function renderBlockquote(node: MdNode, baseDir: string): Promise<Paragraph[]> {
   const out: Paragraph[] = [];
   const children = node.children ?? [];
 
   for (const child of children) {
     if (child.type === 'paragraph') {
       out.push(
-        paragraphFromInline(child.children, {
+        await paragraphFromInline(child.children, {
           border: {
             left: { style: BorderStyle.SINGLE, size: 10, color: 'A0A0A0' }
           },
           indent: { left: 360 },
           spacing: { before: 120, after: 120 }
-        })
+        }, baseDir)
       );
       continue;
     }
@@ -402,23 +510,23 @@ function renderBlockquote(node: MdNode): Paragraph[] {
   return out;
 }
 
-async function markdownAstToDocElements(root: MdNode): Promise<Array<Paragraph | Table>> {
+async function markdownAstToDocElements(root: MdNode, baseDir: string): Promise<Array<Paragraph | Table>> {
   const output: Array<Paragraph | Table> = [];
   const nodes = root.children ?? [];
 
   for (const node of nodes) {
     if (node.type === 'heading') {
       output.push(
-        paragraphFromInline(node.children, {
+        await paragraphFromInline(node.children, {
           heading: mapHeadingLevel(node.depth ?? 1),
           spacing: { before: 280, after: 140 }
-        })
+        }, baseDir)
       );
       continue;
     }
 
     if (node.type === 'paragraph') {
-      output.push(paragraphFromInline(node.children, { spacing: { after: 160 } }));
+      output.push(await paragraphFromInline(node.children, { spacing: { after: 160 } }, baseDir));
       continue;
     }
 
@@ -434,18 +542,18 @@ async function markdownAstToDocElements(root: MdNode): Promise<Array<Paragraph |
     }
 
     if (node.type === 'list') {
-      output.push(...renderList(node));
+      output.push(...(await renderList(node, 0, baseDir)));
       output.push(new Paragraph({ text: '', spacing: { after: 120 } }));
       continue;
     }
 
     if (node.type === 'blockquote') {
-      output.push(...renderBlockquote(node));
+      output.push(...(await renderBlockquote(node, baseDir)));
       continue;
     }
 
     if (node.type === 'table') {
-      output.push(renderTable(node));
+      output.push(await renderTable(node, baseDir));
       output.push(new Paragraph({ text: '', spacing: { after: 120 } }));
       continue;
     }
@@ -487,8 +595,9 @@ async function collectMarkdownFiles(rootDir: string, recursive: boolean): Promis
 export async function convertMarkdownFile(inputFile: string, outputFile: string): Promise<void> {
   const raw = await fs.readFile(inputFile, 'utf-8');
   const ast = unified().use(remarkParse).use(remarkGfm).parse(raw) as MdNode;
+  const baseDir = path.dirname(inputFile);
 
-  const docElements = await markdownAstToDocElements(ast);
+  const docElements = await markdownAstToDocElements(ast, baseDir);
 
   const doc = new Document({
     styles: {

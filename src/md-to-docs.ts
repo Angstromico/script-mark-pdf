@@ -37,9 +37,6 @@ async function convertMarkdownToDocs(
     const pdfPath = path.join(outputDir, `${fileName}.pdf`);
     const docxPath = path.join(outputDir, `${fileName}.docx`);
 
-    // Read markdown content for PDF conversion
-    const markdownContent = await fs.readFile(inputPath, 'utf-8');
-
     // Convert to PDF
     try {
       const mermaidScript = `
@@ -59,7 +56,7 @@ async function convertMarkdownToDocs(
       `;
 
       await mdToPdf(
-        { content: markdownContent },
+        { path: inputPath },
         { 
           dest: pdfPath,
           script: [
