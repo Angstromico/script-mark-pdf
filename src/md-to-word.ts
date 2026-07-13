@@ -144,6 +144,18 @@ type InlineStyle = {
   strike?: boolean;
 };
 
+type ImageDimensions = {
+  width: number;
+  height: number;
+};
+
+type HtmlImage = {
+  src: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+};
+
 function getPngSize(buffer: Buffer): { width: number; height: number } | null {
   if (buffer.length < 24) return null;
   const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47;
@@ -186,6 +198,187 @@ function getJpegSize(buffer: Buffer): { width: number; height: number } | null {
     offset += length;
   }
   return null;
+}
+
+function getImageSize(buffer: Buffer): ImageDimensions | null {
+  return getPngSize(buffer) || getJpegSize(buffer);
+}
+
+function getImageType(buffer: Buffer, imagePath: string): 'png' | 'jpg' | null {
+  if (getPngSize(buffer)) return 'png';
+  if (getJpegSize(buffer)) return 'jpg';
+
+  const ext = path.extname(imagePath).toLowerCase();
+  if (ext === '.png') return 'png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'jpg';
+
+  return null;
+}
+
+function decodeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function parseHtmlAttributes(source: string): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  const attrRegex = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = attrRegex.exec(source)) !== null) {
+    const [, name, doubleQuoted, singleQuoted, unquoted] = match;
+    attrs[name.toLowerCase()] = decodeHtmlAttribute(doubleQuoted ?? singleQuoted ?? unquoted ?? '');
+  }
+
+  return attrs;
+}
+
+function parsePixelDimension(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)(?:px)?$/i);
+  if (!match) return undefined;
+
+  return Math.max(1, Math.round(Number(match[1])));
+}
+
+function extractHtmlImages(html: string): HtmlImage[] {
+  const images: HtmlImage[] = [];
+  const imgRegex = /<img\b([^>]*)>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = imgRegex.exec(html)) !== null) {
+    const attrs = parseHtmlAttributes(match[1]);
+    const src = attrs.src?.trim();
+    if (!src) continue;
+
+    images.push({
+      src,
+      alt: attrs.alt,
+      width: parsePixelDimension(attrs.width),
+      height: parsePixelDimension(attrs.height)
+    });
+  }
+
+  return images;
+}
+
+function htmlAlignment(html: string): (typeof AlignmentType)[keyof typeof AlignmentType] | undefined {
+  const wrapperMatch = html.match(/<(?:p|div)\b([^>]*)>/i);
+  const attrs = wrapperMatch ? parseHtmlAttributes(wrapperMatch[1]) : {};
+  const rawAlign = attrs.align?.toLowerCase();
+  const style = attrs.style?.toLowerCase() ?? '';
+
+  if (rawAlign === 'center' || /text-align\s*:\s*center/.test(style)) return AlignmentType.CENTER;
+  if (rawAlign === 'right' || /text-align\s*:\s*right/.test(style)) return AlignmentType.RIGHT;
+  if (rawAlign === 'left' || /text-align\s*:\s*left/.test(style)) return AlignmentType.LEFT;
+
+  return undefined;
+}
+
+function resolveImagePath(baseDir: string, imageUrl: string): string | null {
+  if (/^(?:https?:|data:)/i.test(imageUrl)) {
+    return null;
+  }
+
+  const withoutAnchor = imageUrl.split('#')[0];
+  const withoutQuery = withoutAnchor.split('?')[0];
+
+  try {
+    return path.resolve(baseDir, decodeURIComponent(withoutQuery));
+  } catch {
+    return path.resolve(baseDir, withoutQuery);
+  }
+}
+
+function calculateImageSize(
+  buffer: Buffer,
+  requestedWidth?: number,
+  requestedHeight?: number
+): ImageDimensions {
+  const natural = getImageSize(buffer) ?? { width: 300, height: 200 };
+  let width = requestedWidth ?? natural.width;
+  let height = requestedHeight ?? natural.height;
+
+  if (requestedWidth && !requestedHeight) {
+    height = Math.round((natural.height * requestedWidth) / natural.width);
+  }
+
+  if (!requestedWidth && requestedHeight) {
+    width = Math.round((natural.width * requestedHeight) / natural.height);
+  }
+
+  const maxWidth = 500;
+  if (width > maxWidth) {
+    height = Math.round((height * maxWidth) / width);
+    width = maxWidth;
+  }
+
+  return {
+    width: Math.max(1, width),
+    height: Math.max(1, height)
+  };
+}
+
+async function imageRunFromUrl(
+  imageUrl: string,
+  baseDir: string,
+  requestedWidth?: number,
+  requestedHeight?: number
+): Promise<ImageRun | null> {
+  const imgPath = resolveImagePath(baseDir, imageUrl);
+  if (!imgPath) {
+    console.warn(chalk.yellow(`Warning: Remote or embedded image URLs are not supported in DOCX: ${imageUrl}`));
+    return null;
+  }
+
+  if (!(await fs.pathExists(imgPath))) {
+    console.warn(chalk.yellow(`Warning: Image file not found: ${imgPath}`));
+    return null;
+  }
+
+  try {
+    const imgBuffer = await fs.readFile(imgPath);
+    const type = getImageType(imgBuffer, imgPath);
+
+    if (!type) {
+      console.warn(chalk.yellow(`Warning: Unsupported image format for DOCX: ${imgPath}`));
+      return null;
+    }
+
+    return new ImageRun({
+      data: imgBuffer,
+      transformation: calculateImageSize(imgBuffer, requestedWidth, requestedHeight),
+      type
+    });
+  } catch (err) {
+    console.warn(chalk.yellow(`Warning: Failed to load image ${imgPath}: ${err}`));
+    return null;
+  }
+}
+
+async function renderHtmlImageParagraphs(html: string, baseDir: string): Promise<Paragraph[]> {
+  const images = extractHtmlImages(html);
+  const out: Paragraph[] = [];
+
+  for (const image of images) {
+    const imageRun = await imageRunFromUrl(image.src, baseDir, image.width, image.height);
+
+    out.push(
+      new Paragraph({
+        children: [imageRun ?? new TextRun({ text: image.alt || image.src })],
+        alignment: htmlAlignment(html),
+        spacing: { after: 160 }
+      })
+    );
+  }
+
+  return out;
 }
 
 async function renderInlineNodes(
@@ -255,50 +448,29 @@ async function renderInlineNodes(
 
     if (node.type === 'image') {
       const imgUrl = node.url ?? '';
-      const imgPath = path.resolve(baseDir, imgUrl);
+      const imageRun = await imageRunFromUrl(imgUrl, baseDir);
 
-      if (await fs.pathExists(imgPath)) {
-        try {
-          const imgBuffer = await fs.readFile(imgPath);
-          const ext = path.extname(imgPath).toLowerCase().replace('.', '');
-
-          let width = 300;
-          let height = 200;
-          const size = getPngSize(imgBuffer) || getJpegSize(imgBuffer);
-          if (size) {
-            width = size.width;
-            height = size.height;
-          }
-
-          const maxWidth = 500;
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-
-          parts.push(
-            new ImageRun({
-              data: imgBuffer,
-              transformation: {
-                width,
-                height
-              },
-              type: ext === 'jpg' || ext === 'jpeg' ? 'jpg' : 'png'
-            })
-          );
-          continue;
-        } catch (err) {
-          console.warn(chalk.yellow(`Warning: Failed to load image ${imgPath}: ${err}`));
-        }
-      } else {
-        console.warn(chalk.yellow(`Warning: Image file not found: ${imgPath}`));
+      if (imageRun) {
+        parts.push(imageRun);
+        continue;
       }
 
       parts.push(new TextRun({ text: node.alt || node.value || imgUrl, ...style }));
       continue;
     }
 
-      parts.push(new TextRun({ text: textFromInline(node), ...style }));
+    if (node.type === 'html') {
+      const images = extractHtmlImages(node.value ?? '');
+      if (images.length > 0) {
+        for (const image of images) {
+          const imageRun = await imageRunFromUrl(image.src, baseDir, image.width, image.height);
+          parts.push(imageRun ?? new TextRun({ text: image.alt || image.src, ...style }));
+        }
+        continue;
+      }
+    }
+
+    parts.push(new TextRun({ text: textFromInline(node), ...style }));
   }
 
   return parts.length > 0 ? parts : [new TextRun('')];
@@ -530,6 +702,16 @@ async function markdownAstToDocElements(root: MdNode, baseDir: string): Promise<
       continue;
     }
 
+    if (node.type === 'html') {
+      const htmlParagraphs = await renderHtmlImageParagraphs(node.value ?? '', baseDir);
+
+      if (htmlParagraphs.length > 0) {
+        output.push(...htmlParagraphs);
+      }
+
+      continue;
+    }
+
     if (node.type === 'code') {
       // Check if it's a mermaid diagram
       if (node.lang === 'mermaid') {
@@ -711,9 +893,11 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(chalk.red('\nFatal error'));
-  console.error(chalk.red(message));
-  process.exit(1);
-});
+if (require.main === module) {
+  run().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red('\nFatal error'));
+    console.error(chalk.red(message));
+    process.exit(1);
+  });
+}
