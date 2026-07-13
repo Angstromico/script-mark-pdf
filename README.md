@@ -40,7 +40,7 @@ A TypeScript CLI application that converts markdown files to professional PDF an
 
 ## License
 
-ISC
+GNU General Public License v3.0
 
 ## Author
 
